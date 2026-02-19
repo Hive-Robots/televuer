@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class TeleVuer:
-    def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, cert_file=None, key_file=None, ngrok=False, webrtc=False):
+    def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, cert_file=None, key_file=None, ngrok=False, webrtc=False, port=8012):
         """
         TeleVuer class for OpenXR-based XR teleoperate applications.
         This class handles the communication with the Vuer server and manages the shared memory for image and pose data.
@@ -21,6 +21,7 @@ class TeleVuer:
         :param cert_file: str, path to the SSL certificate file.
         :param key_file: str, path to the SSL key file.
         :param ngrok: bool, whether to use ngrok for tunneling.
+        :param port: int, port number for the Vuer server (default: 8012).
         """
         self.binocular = binocular
         self.use_hand_tracking = use_hand_tracking
@@ -37,9 +38,9 @@ class TeleVuer:
             key_file = os.path.join(current_module_dir, "key.pem")
 
         if ngrok:
-            self.vuer = Vuer(host='0.0.0.0', queries=dict(grid=False), queue_len=3)
+            self.vuer = Vuer(host='0.0.0.0', port=port, queries=dict(grid=False), queue_len=3)
         else:
-            self.vuer = Vuer(host='0.0.0.0', cert=cert_file, key=key_file, queries=dict(grid=False), queue_len=3)
+            self.vuer = Vuer(host='0.0.0.0', port=port, cert=cert_file, key=key_file, queries=dict(grid=False), queue_len=3)
 
         self.vuer.add_handler("CAMERA_MOVE")(self.on_cam_move)
         if self.use_hand_tracking:

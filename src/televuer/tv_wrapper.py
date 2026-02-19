@@ -182,7 +182,7 @@ class TeleData:
 
 class TeleVuerWrapper:
     def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, return_state_data: bool = True, return_hand_rot_data: bool = False,
-                       cert_file = None, key_file = None, ngrok = False, webrtc = False):
+                       cert_file = None, key_file = None, ngrok = False, webrtc = False, port = 8012):
         """
         TeleVuerWrapper is a wrapper for the TeleVuer class, which handles XR device's data suit for robot control.
         It initializes the TeleVuer instance with the specified parameters and provides a method to get motion state data.
@@ -200,7 +200,7 @@ class TeleVuerWrapper:
         self.return_state_data = return_state_data
         self.return_hand_rot_data = return_hand_rot_data
         self.tvuer = TeleVuer(binocular, use_hand_tracking, img_shape, img_shm_name, cert_file=cert_file, key_file=key_file,
-                                ngrok=ngrok, webrtc=webrtc)
+                                ngrok=ngrok, webrtc=webrtc, port=port)
     
     def get_motion_state_data(self):
         """
