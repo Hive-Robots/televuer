@@ -182,7 +182,7 @@ class TeleData:
 
 class TeleVuerWrapper:
     def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, return_state_data: bool = True, return_hand_rot_data: bool = False,
-                       cert_file = None, key_file = None, ngrok = False, webrtc = False, port = 8012):
+                       cert_file = None, key_file = None, ngrok = False, webrtc = False, port = 8012, user_height_cm: float = 160.0):
         """
         TeleVuerWrapper is a wrapper for the TeleVuer class, which handles XR device's data suit for robot control.
         It initializes the TeleVuer instance with the specified parameters and provides a method to get motion state data.
@@ -195,10 +195,14 @@ class TeleVuerWrapper:
         :param return_hand_rot: A boolean indicating whether to return the hand rotation data.
         :param cert_file: The path to the certificate file for secure connection.
         :param key_file: The path to the key file for secure connection.
+        :param user_height_cm: User's height in centimeters (default 160cm, which is the calibration baseline).
         """
         self.use_hand_tracking = use_hand_tracking
         self.return_state_data = return_state_data
         self.return_hand_rot_data = return_hand_rot_data
+        # Height-based calibration: scale offsets proportionally to user height
+        self.user_height_cm = max(130.0, min(210.0, user_height_cm))  # Clamp to reasonable range
+        self.height_scale_factor = self.user_height_cm / 160.0  # 160cm  is the calibration baseline
         self.tvuer = TeleVuer(binocular, use_hand_tracking, img_shape, img_shm_name, cert_file=cert_file, key_file=key_file,
                                 ngrok=ngrok, webrtc=webrtc, port=port)
     
@@ -264,10 +268,11 @@ class TeleVuerWrapper:
             # So it is necessary to translate the origin of IPunitree_Brobot_head_arm from HEAD to WAIST.
             left_IPunitree_Brobot_waist_arm = left_IPunitree_Brobot_head_arm.copy()
             right_IPunitree_Brobot_waist_arm = right_IPunitree_Brobot_head_arm.copy()
-            left_IPunitree_Brobot_waist_arm[0, 3] +=0.15 # x
-            right_IPunitree_Brobot_waist_arm[0,3] +=0.15
-            left_IPunitree_Brobot_waist_arm[2, 3] +=0.45 # z
-            right_IPunitree_Brobot_waist_arm[2,3] +=0.45
+            # Height-aware offset: scale with user height relative to 160cm calibration baseline
+            left_IPunitree_Brobot_waist_arm[0, 3] += 0.15 * self.height_scale_factor  # x
+            right_IPunitree_Brobot_waist_arm[0, 3] += 0.15 * self.height_scale_factor
+            left_IPunitree_Brobot_waist_arm[2, 3] += 0.45 * self.height_scale_factor  # z
+            right_IPunitree_Brobot_waist_arm[2, 3] += 0.45 * self.height_scale_factor
 
             # -----------------------------------hand position----------------------------------------
             if left_arm_is_valid and right_arm_is_valid:
@@ -372,12 +377,11 @@ class TeleVuerWrapper:
             # So it is necessary to translate the origin of IPunitree_Brobot_head_arm from HEAD to WAIST.
             left_IPunitree_Brobot_waist_arm = left_IPunitree_Brobot_head_arm.copy()
             right_IPunitree_Brobot_waist_arm = right_IPunitree_Brobot_head_arm.copy()
-            left_IPunitree_Brobot_waist_arm[0, 3] +=0.15 # x
-            right_IPunitree_Brobot_waist_arm[0,3] +=0.15
-            left_IPunitree_Brobot_waist_arm[2, 3] +=0.45 # z
-            right_IPunitree_Brobot_waist_arm[2,3] +=0.45
-            # left_IPunitree_Brobot_waist_arm[1, 3] +=0.02 # y
-            # right_IPunitree_Brobot_waist_arm[1,3] +=0.02
+            # Height-aware offset: scale with user height relative to 160cm calibration baseline
+            left_IPunitree_Brobot_waist_arm[0, 3] += 0.15 * self.height_scale_factor  # x
+            right_IPunitree_Brobot_waist_arm[0, 3] += 0.15 * self.height_scale_factor
+            left_IPunitree_Brobot_waist_arm[2, 3] += 0.45 * self.height_scale_factor  # z
+            right_IPunitree_Brobot_waist_arm[2, 3] += 0.45 * self.height_scale_factor
 
             # return data
             if self.return_state_data:
