@@ -201,7 +201,41 @@ class TeleVuerWrapper:
         self.return_hand_rot_data = return_hand_rot_data
         self.tvuer = TeleVuer(binocular, use_hand_tracking, img_shape, img_shm_name, cert_file=cert_file, key_file=key_file,
                                 ngrok=ngrok, webrtc=webrtc, port=port)
-    
+
+    # ==================== HUD ====================
+    @staticmethod
+    def _write_str(arr, s: str, size: int) -> None:
+        b = s.encode("utf-8")[:size].ljust(size, b"\x00")
+        arr[:] = b
+
+    def set_hud_state(self, *, reveal: bool, ctrl_map_visible: bool,
+                      recording: bool, task_name: str, arms: str,
+                      ep_good: int, ep_bad: int, ep_review: int,
+                      left_preset_name: str, right_preset_name: str) -> None:
+        tv = self.tvuer
+        tv.hud_reveal_shared.value       = reveal
+        tv.hud_ctrl_map_shared_vis.value = ctrl_map_visible
+        tv.hud_recording_shared.value    = recording
+        self._write_str(tv.hud_task_name_shared,    task_name,         256)
+        self._write_str(tv.hud_arms_shared,         arms,               32)
+        self._write_str(tv.hud_left_preset_shared,  left_preset_name,   64)
+        self._write_str(tv.hud_right_preset_shared, right_preset_name,  64)
+        tv.hud_ep_good_shared.value   = ep_good
+        tv.hud_ep_bad_shared.value    = ep_bad
+        tv.hud_ep_review_shared.value = ep_review
+
+    def set_hud_recording(self, recording: bool) -> None:
+        """Lightweight setter — drives only the always-on rec dot. Safe to call in hand mode."""
+        self.tvuer.hud_recording_shared.value = recording
+
+    def set_hud_ctrl_map(self, text: str) -> None:
+        self._write_str(self.tvuer.hud_ctrl_map_shared, text, 4096)
+
+    def post_notification(self, text: str) -> None:
+        import time
+        self._write_str(self.tvuer.hud_notify_text_shared, text, 128)
+        self.tvuer.hud_notify_ts_shared.value = time.time()
+
     def get_motion_state_data(self):
         """
         Get processed motion state data from the TeleVuer instance.
