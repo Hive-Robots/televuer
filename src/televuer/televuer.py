@@ -66,16 +66,7 @@ class TeleVuer:
         self.img_array = np.ndarray(img_shape, dtype=np.uint8, buffer=existing_shm.buf)
 
         self.webrtc = webrtc
-        if self.binocular and not self.webrtc:
-            self.vuer.spawn(start=False)(self.main_image_binocular)
-        elif not self.binocular and not self.webrtc:
-            self.vuer.spawn(start=False)(self.main_image_monocular)
-        elif self.webrtc:
-            self.vuer.spawn(start=False)(self.main_image_webrtc)
-
-        self.vuer.spawn(start=False)(self.update_hud_status)
-        self.vuer.spawn(start=False)(self.update_hud_notify)
-        self.vuer.spawn(start=False)(self.update_hud_ctrl_map)
+        self.vuer.spawn(start=False)(self._main_handler)
 
         self.head_pose_shared = Array('d', 16, lock=True)
         self.left_arm_pose_shared = Array('d', 16, lock=True)
@@ -132,6 +123,23 @@ class TeleVuer:
         self.process = Process(target=self.vuer_run)
         self.process.daemon = True
         self.process.start()
+
+    async def _main_handler(self, session):
+        """Single socket handler that runs the image stream and HUD tasks concurrently.
+
+        vuer.spawn() stores only ONE socket_handler — calling it multiple times
+        overwrites the previous. We use session.spawn_task() to run the HUD
+        coroutines as independent asyncio tasks, then await the image coroutine.
+        """
+        session.spawn_task(self.update_hud_status(session))
+        session.spawn_task(self.update_hud_notify(session))
+        session.spawn_task(self.update_hud_ctrl_map(session))
+        if self.binocular and not self.webrtc:
+            await self.main_image_binocular(session)
+        elif not self.binocular and not self.webrtc:
+            await self.main_image_monocular(session)
+        else:
+            await self.main_image_webrtc(session)
 
     def vuer_run(self):
         try:
