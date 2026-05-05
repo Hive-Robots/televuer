@@ -130,16 +130,23 @@ class TeleVuer:
         vuer.spawn() stores only ONE socket_handler — calling it multiple times
         overwrites the previous. We use session.spawn_task() to run the HUD
         coroutines as independent asyncio tasks, then await the image coroutine.
+        HUD tasks are cancelled in a finally block so they don't outlive the session.
         """
-        session.spawn_task(self.update_hud_status(session))
-        session.spawn_task(self.update_hud_notify(session))
-        session.spawn_task(self.update_hud_ctrl_map(session))
-        if self.binocular and not self.webrtc:
-            await self.main_image_binocular(session)
-        elif not self.binocular and not self.webrtc:
-            await self.main_image_monocular(session)
-        else:
-            await self.main_image_webrtc(session)
+        hud_tasks = [
+            session.spawn_task(self.update_hud_status(session)),
+            session.spawn_task(self.update_hud_notify(session)),
+            session.spawn_task(self.update_hud_ctrl_map(session)),
+        ]
+        try:
+            if self.binocular and not self.webrtc:
+                await self.main_image_binocular(session)
+            elif not self.binocular and not self.webrtc:
+                await self.main_image_monocular(session)
+            else:
+                await self.main_image_webrtc(session)
+        finally:
+            for t in hud_tasks:
+                t.cancel()
 
     def vuer_run(self):
         try:
