@@ -1,5 +1,5 @@
 from vuer import Vuer
-from vuer.schemas import ImageBackground, Hands, MotionControllers, WebRTCVideoPlane, WebRTCStereoVideoPlane, Text3D, Group
+from vuer.schemas import ImageBackground, Hands, MotionControllers, WebRTCVideoPlane, WebRTCStereoVideoPlane
 from multiprocessing import Value, Array, Process, shared_memory
 import numpy as np
 import asyncio
@@ -9,17 +9,20 @@ import time as _time
 from pathlib import Path
 
 
-def draw_rec_indicator(frame: np.ndarray, recording: bool) -> np.ndarray:
-    """Composite a recording indicator (grey dot idle, red dot + REC label active)
-    onto the top-left corner of a BGR frame. Returns a copy."""
-    out = frame.copy()
-    cx, cy, r = 30, 30, 14
-    color = (0, 0, 220) if recording else (120, 120, 120)  # BGR
-    cv2.circle(out, (cx, cy), r, color, -1)
-    if recording:
-        cv2.putText(out, "REC", (50, 38), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7, (0, 0, 220), 2, cv2.LINE_AA)
-    return out
+def _draw_text_panel(frame: np.ndarray, lines: list, x: int, y: int,
+                     color=(255, 255, 255)) -> None:
+    """Draw a multi-line monospace text block with a semi-transparent background."""
+    font, scale, thick, line_h = cv2.FONT_HERSHEY_PLAIN, 1.2, 1, 26
+    pad = 5
+    max_w = max((cv2.getTextSize(ln, font, scale, thick)[0][0] for ln in lines), default=0)
+    x0, y0 = x - pad, y - 14
+    x1, y1 = x + max_w + pad, y + len(lines) * line_h + pad
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+    for i, ln in enumerate(lines):
+        cv2.putText(frame, ln, (x, y + i * line_h), font, scale, color, thick, cv2.LINE_AA)
+
 
 
 class TeleVuer:
@@ -132,21 +135,12 @@ class TeleVuer:
         coroutines as independent asyncio tasks, then await the image coroutine.
         HUD tasks are cancelled in a finally block so they don't outlive the session.
         """
-        hud_tasks = [
-            session.spawn_task(self.update_hud_status(session)),
-            session.spawn_task(self.update_hud_notify(session)),
-            session.spawn_task(self.update_hud_ctrl_map(session)),
-        ]
-        try:
-            if self.binocular and not self.webrtc:
-                await self.main_image_binocular(session)
-            elif not self.binocular and not self.webrtc:
-                await self.main_image_monocular(session)
-            else:
-                await self.main_image_webrtc(session)
-        finally:
-            for t in hud_tasks:
-                t.cancel()
+        if self.binocular and not self.webrtc:
+            await self.main_image_binocular(session)
+        elif not self.binocular and not self.webrtc:
+            await self.main_image_monocular(session)
+        else:
+            await self.main_image_webrtc(session)
 
     def vuer_run(self):
         try:
@@ -268,7 +262,8 @@ class TeleVuer:
             )
 
         while True:
-            display_image = draw_rec_indicator(self.img_array, bool(self.hud_recording_shared.value))
+            display_image = self.img_array.copy()
+            self._draw_hud_overlay(display_image)
             display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
             # aspect_ratio = self.img_width / self.img_height
             session.upsert(
@@ -276,11 +271,10 @@ class TeleVuer:
                     ImageBackground(
                         display_image[:, :self.img_width],
                         aspect=1.778,
-                        height=1,
-                        distanceToCamera=1,
-                        # The underlying rendering engine supported a layer binary bitmask for both objects and the camera.
-                        # Below we set the two image planes, left and right, to layers=1 and layers=2.
-                        # Note that these two masks are associated with left eye’s camera and the right eye’s camera.
+                        height=1.5,
+                        fixed=True,
+                        position=[0, 1.5, -2],
+                        # Layer bitmask: layers=1 → left eye only, layers=2 → right eye only.
                         layers=1,
                         format="jpeg",
                         quality=100,
@@ -290,8 +284,9 @@ class TeleVuer:
                     ImageBackground(
                         display_image[:, self.img_width:],
                         aspect=1.778,
-                        height=1,
-                        distanceToCamera=1,
+                        height=1.5,
+                        fixed=True,
+                        position=[0, 1.5, -2],
                         layers=2,
                         format="jpeg",
                         quality=100,
@@ -301,7 +296,7 @@ class TeleVuer:
                 ],
                 to="bgChildren",
             )
-            # 'jpeg' encoding should give you about 30fps with a 16ms wait in-between.
+            # ‘jpeg’ encoding should give you about 30fps with a 16ms wait in-between.
             await asyncio.sleep(0.016 * 2)
 
     async def main_image_monocular(self, session, fps=60):
@@ -327,7 +322,8 @@ class TeleVuer:
             )
 
         while True:
-            display_image = draw_rec_indicator(self.img_array, bool(self.hud_recording_shared.value))
+            display_image = self.img_array.copy()
+            self._draw_hud_overlay(display_image)
             display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
             # aspect_ratio = self.img_width / self.img_height
             session.upsert(
@@ -335,10 +331,11 @@ class TeleVuer:
                     ImageBackground(
                         display_image,
                         aspect=1.778,
-                        height=1,
-                        distanceToCamera=1,
+                        height=1.5,
+                        fixed=True,
+                        position=[0, 1.5, -2],
                         format="jpeg",
-                        quality=50,
+                        quality=85,
                         key="background-mono",
                         interpolate=True,
                     ),
@@ -383,71 +380,47 @@ class TeleVuer:
             await asyncio.sleep(1)
 
     # ==================== HUD ====================
-    async def update_hud_status(self, session, fps=10):
-        """Hold-to-reveal status panel showing recording / task / episode counts / hand presets."""
-        while True:
-            await asyncio.sleep(1.0 / fps)
-            if not self.hud_reveal_shared.value:
-                session.upsert(Group(key="hud_status"), to="children")
-                continue
+    def _draw_hud_overlay(self, frame: np.ndarray) -> None:
+        """Draw all HUD elements onto frame in-place (BGR)."""
+        w = frame.shape[1]
 
-            recording = bool(self.hud_recording_shared.value)
-            task_name = bytes(self.hud_task_name_shared[:]).decode("utf-8", "replace").rstrip("\x00")
-            arms      = bytes(self.hud_arms_shared[:]).decode("utf-8", "replace").rstrip("\x00")
-            ep_good   = self.hud_ep_good_shared.value
-            ep_bad    = self.hud_ep_bad_shared.value
-            ep_review = self.hud_ep_review_shared.value
-            ep_total  = ep_good + ep_bad + ep_review
-            l_preset  = bytes(self.hud_left_preset_shared[:]).decode("utf-8", "replace").rstrip("\x00")
-            r_preset  = bytes(self.hud_right_preset_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+        # Recording dot — always on
+        recording = bool(self.hud_recording_shared.value)
+        cx, cy, r = 30, 30, 14
+        cv2.circle(frame, (cx, cy), r, (0, 0, 220) if recording else (120, 120, 120), -1)
+        if recording:
+            cv2.putText(frame, "REC", (50, 38), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (0, 0, 220), 2, cv2.LINE_AA)
 
-            rec_str = "● REC" if recording else "○ READY"
-            text = "\n".join([
-                rec_str,
-                f"Task: {task_name}",
+        # Transient notification — yellow, centred near top
+        msg = bytes(self.hud_notify_text_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+        if msg and (_time.time() - self.hud_notify_ts_shared.value) < 2.0:
+            (tw, _), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)
+            cv2.putText(frame, msg, (w // 2 - tw // 2, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (57, 255, 20), 2, cv2.LINE_AA)
+
+        # Status panel — hold-to-reveal, left side
+        if bool(self.hud_reveal_shared.value):
+            task  = bytes(self.hud_task_name_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+            arms  = bytes(self.hud_arms_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+            g, b, rv = (self.hud_ep_good_shared.value, self.hud_ep_bad_shared.value,
+                        self.hud_ep_review_shared.value)
+            lp    = bytes(self.hud_left_preset_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+            rp    = bytes(self.hud_right_preset_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+            lines = [
+                "REC" if recording else "READY",
+                f"Task: {task}",
                 f"Arms: {arms}",
-                f"Episodes: {ep_total}  ({ep_good} good / {ep_bad} bad / {ep_review} review)",
-                f"L preset: {l_preset}",
-                f"R preset: {r_preset}",
-            ])
+                f"Ep: {g+b+rv}  ({g}g / {b}b / {rv}r)",
+                f"L preset: {lp}",
+                f"R preset: {rp}",
+            ]
+            _draw_text_panel(frame, lines, x=10, y=80)
 
-            session.upsert(
-                Group(key="hud_status", children=[
-                    Text3D(text, position=[-0.4, -0.25, -1.2], scale=0.04, color="white"),
-                ]),
-                to="children",
-            )
-
-    async def update_hud_notify(self, session, fps=20):
-        """Transient yellow notification (auto-disappears ~2s after post_notification)."""
-        while True:
-            await asyncio.sleep(1.0 / fps)
-            msg = bytes(self.hud_notify_text_shared[:]).decode("utf-8", "replace").rstrip("\x00")
-            age = _time.time() - self.hud_notify_ts_shared.value
-            if msg and age < 2.0:
-                session.upsert(
-                    Group(key="hud_notify", children=[
-                        Text3D(msg, position=[-0.2, 0.15, -1.0], scale=0.06, color="yellow"),
-                    ]),
-                    to="children",
-                )
-            else:
-                session.upsert(Group(key="hud_notify"), to="children")
-
-    async def update_hud_ctrl_map(self, session, fps=10):
-        """Hold-to-reveal panel rendering the active controller binding listing."""
-        while True:
-            await asyncio.sleep(1.0 / fps)
-            if not self.hud_ctrl_map_shared_vis.value:
-                session.upsert(Group(key="hud_ctrl_map"), to="children")
-                continue
-            text = bytes(self.hud_ctrl_map_shared[:]).decode("utf-8", "replace").rstrip("\x00")
-            session.upsert(
-                Group(key="hud_ctrl_map", children=[
-                    Text3D(text, position=[0.45, 0.2, -1.2], scale=0.025, color="white"),
-                ]),
-                to="children",
-            )
+        # Ctrl-map panel — hold-to-reveal, right side
+        if bool(self.hud_ctrl_map_shared_vis.value):
+            ctrl = bytes(self.hud_ctrl_map_shared[:]).decode("utf-8", "replace").rstrip("\x00")
+            _draw_text_panel(frame, ctrl.split("\n"), x=w - 310, y=80, color=(180, 255, 180))
 
     # ==================== common data ====================
     @property
