@@ -234,7 +234,7 @@ class TeleVuer:
                         # Note that these two masks are associated with left eye’s camera and the right eye’s camera.
                         layers=1,
                         format="jpeg",
-                        quality=100,
+                        quality=70,
                         key="background-left",
                         interpolate=True,
                     ),
@@ -245,7 +245,7 @@ class TeleVuer:
                         distanceToCamera=1,
                         layers=2,
                         format="jpeg",
-                        quality=100,
+                        quality=70,
                         key="background-right",
                         interpolate=True,
                     ),
