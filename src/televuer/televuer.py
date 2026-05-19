@@ -277,7 +277,7 @@ class TeleVuer:
                         # Layer bitmask: layers=1 → left eye only, layers=2 → right eye only.
                         layers=1,
                         format="jpeg",
-                        quality=100,
+                        quality=70,
                         key="background-left",
                         interpolate=True,
                     ),
@@ -289,7 +289,7 @@ class TeleVuer:
                         position=[0, 1.5, -2],
                         layers=2,
                         format="jpeg",
-                        quality=100,
+                        quality=70,
                         key="background-right",
                         interpolate=True,
                     ),
