@@ -24,9 +24,37 @@ def _draw_text_panel(frame: np.ndarray, lines: list, x: int, y: int,
         cv2.putText(frame, ln, (x, y + i * line_h), font, scale, color, thick, cv2.LINE_AA)
 
 
+def _obj_attr(obj, name, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _panel_position(panel, fallback: list[float]) -> list[float]:
+    x = _obj_attr(panel, "x")
+    y = _obj_attr(panel, "y")
+    z = _obj_attr(panel, "z")
+    if x is None or y is None or z is None:
+        return fallback
+    return [float(x), float(y), float(z)]
+
+
+def _fallback_panel_position(position: str) -> list[float]:
+    positions = {
+        "left": [-1.35, 1.35, -2.05],
+        "right": [1.35, 1.35, -2.05],
+        "top": [0.0, 2.15, -2.05],
+        "tl": [-0.85, 2.05, -1.9],
+        "tr": [0.85, 2.05, -1.9],
+        "bl": [-0.85, 0.65, -1.9],
+        "br": [0.85, 0.65, -1.9],
+    }
+    return positions.get(position, [0.0, 1.35, -2.0])
+
 
 class TeleVuer:
-    def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, cert_file=None, key_file=None, ngrok=False, webrtc=False, port=8012):
+    def __init__(self, binocular: bool, use_hand_tracking: bool, img_shape, img_shm_name, cert_file=None, key_file=None, ngrok=False, webrtc=False, port=8012,
+                 cam_shm_buffers=None, cam_segments=None, cam_layout=None):
         """
         TeleVuer class for OpenXR-based XR teleoperate applications.
         This class handles the communication with the Vuer server and manages the shared memory for image and pose data.
@@ -67,10 +95,20 @@ class TeleVuer:
 
         existing_shm = shared_memory.SharedMemory(name=img_shm_name)
         self.img_array = np.ndarray(img_shape, dtype=np.uint8, buffer=existing_shm.buf)
+        self.cam_shm_buffers = cam_shm_buffers or {}
+        self.cam_segments = {_obj_attr(segment, "name"): segment for segment in (cam_segments or [])}
+        self.cam_layout = cam_layout
 
         self.webrtc = webrtc
         self.vuer.spawn(start=False)(self._main_handler)
 
+        # Geometry cache: only send position/rotation to the browser when they change.
+        # React's useLayoutEffect compares array props by reference (Object.is), so a new
+        # array with the same values still triggers the effect and can fire mesh.position.set()
+        # mid-frame between left/right eye renders, causing the "opposite-direction" jitter.
+        # By omitting position/rotation when unchanged, the Three.js mesh retains its world
+        # position without the effect re-firing.
+        self._screen_geom_cache: dict = {}   # key → (pos_tuple, rot_tuple)
         self.head_pose_shared = Array('d', 16, lock=True)
         self.left_arm_pose_shared = Array('d', 16, lock=True)
         self.right_arm_pose_shared = Array('d', 16, lock=True)
@@ -240,6 +278,7 @@ class TeleVuer:
             pass
     
     async def main_image_binocular(self, session, fps=60):
+        self._screen_geom_cache.clear()
         if self.use_hand_tracking:
             session.upsert(
                 Hands(
@@ -262,44 +301,15 @@ class TeleVuer:
             )
 
         while True:
-            display_image = self.img_array.copy()
-            self._draw_hud_overlay(display_image)
-            display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
-            # aspect_ratio = self.img_width / self.img_height
-            session.upsert(
-                [
-                    ImageBackground(
-                        display_image[:, :self.img_width],
-                        aspect=1.778,
-                        height=1.5,
-                        fixed=True,
-                        position=[0, 1.5, -2],
-                        # Layer bitmask: layers=1 → left eye only, layers=2 → right eye only.
-                        layers=1,
-                        format="jpeg",
-                        quality=100,
-                        key="background-left",
-                        interpolate=True,
-                    ),
-                    ImageBackground(
-                        display_image[:, self.img_width:],
-                        aspect=1.778,
-                        height=1.5,
-                        fixed=True,
-                        position=[0, 1.5, -2],
-                        layers=2,
-                        format="jpeg",
-                        quality=100,
-                        key="background-right",
-                        interpolate=True,
-                    ),
-                ],
-                to="bgChildren",
-            )
+            try:
+                session.upsert(self._camera_screen_elements(binocular=True), to="bgChildren")
+            except AssertionError:
+                break
             # ‘jpeg’ encoding should give you about 30fps with a 16ms wait in-between.
             await asyncio.sleep(0.016 * 2)
 
     async def main_image_monocular(self, session, fps=60):
+        self._screen_geom_cache.clear()
         if self.use_hand_tracking:
             session.upsert(
                 Hands(
@@ -322,27 +332,11 @@ class TeleVuer:
             )
 
         while True:
-            display_image = self.img_array.copy()
-            self._draw_hud_overlay(display_image)
-            display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
-            # aspect_ratio = self.img_width / self.img_height
-            session.upsert(
-                [
-                    ImageBackground(
-                        display_image,
-                        aspect=1.778,
-                        height=1.5,
-                        fixed=True,
-                        position=[0, 1.5, -2],
-                        format="jpeg",
-                        quality=85,
-                        key="background-mono",
-                        interpolate=True,
-                    ),
-                ],
-                to="bgChildren",
-            )
-            await asyncio.sleep(0.016)
+            try:
+                session.upsert(self._camera_screen_elements(binocular=False), to="bgChildren")
+            except AssertionError:
+                break
+            await asyncio.sleep(0.033)
 
     async def main_image_webrtc(self, session, fps=60):
         if self.use_hand_tracking:
@@ -378,6 +372,139 @@ class TeleVuer:
         )
         while True:
             await asyncio.sleep(1)
+
+    def _active_layout(self):
+        return self.cam_layout
+
+    def _camera_screen_elements(self, binocular: bool):
+        if self.cam_layout is None or not self.cam_shm_buffers:
+            frame = self.img_array.copy()
+            self._draw_hud_overlay(frame)
+            return self._image_elements(
+                frame,
+                key="background",
+                height=1.15,
+                position=[0.0, 1.0, -2.0],
+                binocular=binocular,
+                quality=85,
+            )
+
+        layout = self._active_layout()
+        main_name = _obj_attr(layout, "main")
+
+        elements = []
+        main_segment = self.cam_segments.get(main_name)
+        main_buffer = self._segment_buffer(main_segment)
+        if main_buffer is not None:
+            main = main_buffer.copy()
+            self._draw_hud_overlay(main)
+            elements.extend(
+                self._image_elements(
+                    main,
+                    key=f"camera-{main_name}",
+                    height=float(_obj_attr(layout, "main_height", 1.15)),
+                    position=list(_obj_attr(layout, "main_position", [0.0, 1.0, -2.0])),
+                    binocular=binocular and bool(_obj_attr(main_segment, "binocular", False)),
+                    quality=int(_obj_attr(layout, "main_quality", 85)),
+                )
+            )
+
+        default_panel_quality = int(_obj_attr(layout, "panel_quality", 70))
+        for panel in _obj_attr(layout, "panels", []):
+            segment_name = _obj_attr(panel, "segment")
+            segment = self.cam_segments.get(segment_name)
+            buffer = self._segment_buffer(segment)
+            if buffer is None:
+                continue
+            position_name = _obj_attr(panel, "position")
+            height = _obj_attr(panel, "height")
+            if height is None:
+                height = max(0.35, float(_obj_attr(panel, "scale", 0.6)))
+            raw_rot = _obj_attr(panel, "rotation")
+            rotation = list(raw_rot) if raw_rot is not None else None
+            panel_quality = _obj_attr(panel, "quality")
+            if panel_quality is None:
+                panel_quality = default_panel_quality
+            elements.extend(
+                self._image_elements(
+                    buffer.copy(),
+                    key=f"camera-{segment_name}",
+                    height=float(height),
+                    position=_panel_position(panel, _fallback_panel_position(position_name)),
+                    binocular=binocular and bool(_obj_attr(segment, "binocular", False)),
+                    quality=int(panel_quality),
+                    rotation=rotation,
+                )
+            )
+
+        return elements
+
+    def _segment_buffer(self, segment):
+        if segment is None:
+            return None
+        return self.cam_shm_buffers.get(_obj_attr(segment, "shm_name"))
+
+    def _image_elements(self, frame, *, key: str, height: float, position: list[float], binocular: bool, quality: int, rotation: list[float] | None = None):
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        geom_sig = (tuple(position), tuple(rotation) if rotation is not None else None)
+
+        def _geom_kwargs(k: str) -> dict:
+            """Return position/rotation kwargs only when they changed since last send.
+            Omitting them on unchanged frames prevents React's useLayoutEffect from
+            calling mesh.position.set() every frame and causing mid-render jitter."""
+            if self._screen_geom_cache.get(k) != geom_sig:
+                self._screen_geom_cache[k] = geom_sig
+                kw = {"position": position}
+                if rotation is not None:
+                    kw["rotation"] = rotation
+                return kw
+            return {}
+
+        if binocular:
+            split = rgb.shape[1] // 2
+            aspect = split / rgb.shape[0]
+            return [
+                ImageBackground(
+                    rgb[:, :split],
+                    aspect=aspect,
+                    height=height,
+                    fixed=True,
+                    layers=1,
+                    format="jpeg",
+                    quality=quality,
+                    key=f"{key}-left",
+                    interpolate=True,
+                    **_geom_kwargs(f"{key}-left"),
+                ),
+                ImageBackground(
+                    rgb[:, split:],
+                    aspect=aspect,
+                    height=height,
+                    fixed=True,
+                    layers=2,
+                    format="jpeg",
+                    quality=quality,
+                    key=f"{key}-right",
+                    interpolate=True,
+                    **_geom_kwargs(f"{key}-right"),
+                ),
+            ]
+
+        aspect = rgb.shape[1] / rgb.shape[0]
+        return [
+            ImageBackground(
+                rgb,
+                aspect=aspect,
+                height=height,
+                fixed=True,
+                format="jpeg",
+                quality=quality,
+                key=key,
+                interpolate=True,
+                **_geom_kwargs(key),
+            )
+        ]
 
     # ==================== HUD ====================
     def _draw_hud_overlay(self, frame: np.ndarray) -> None:
