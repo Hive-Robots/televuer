@@ -3,8 +3,10 @@ from vuer.schemas import ImageBackground, Hands, MotionControllers, WebRTCVideoP
 from multiprocessing import Value, Array, Process, shared_memory
 import numpy as np
 import asyncio
+import ctypes
 import cv2
 import os
+import signal
 import time as _time
 from pathlib import Path
 
@@ -161,6 +163,15 @@ class TeleVuer:
         self.hud_notify_text_shared  = Array('c', 128, lock=True)
         self.hud_notify_ts_shared    = Value('d', 0.0, lock=True)
 
+        # Kill any stale process holding this port (e.g., from a previous run that segfaulted
+        # and bypassed daemon-process cleanup). This ensures the new vuer server can bind.
+        import subprocess as _sp
+        try:
+            _sp.run(["fuser", "-k", f"{port}/tcp"], capture_output=True, timeout=2.0)
+            _time.sleep(0.3)
+        except Exception:
+            pass
+
         self.process = Process(target=self.vuer_run)
         self.process.daemon = True
         self.process.start()
@@ -181,6 +192,13 @@ class TeleVuer:
             await self.main_image_webrtc(session)
 
     def vuer_run(self):
+        # Ask the kernel to send SIGTERM to this process when the parent dies,
+        # even if the parent is killed by a signal (e.g. segfault) that bypasses
+        # Python's atexit/daemon-process cleanup.
+        try:
+            ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG=1
+        except Exception:
+            pass
         try:
             self.vuer.run()
         except KeyboardInterrupt:
