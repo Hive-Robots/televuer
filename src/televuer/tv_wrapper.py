@@ -417,21 +417,24 @@ class TeleVuerWrapper:
             # left_IPunitree_Brobot_waist_arm[1, 3] +=0.02 # y
             # right_IPunitree_Brobot_waist_arm[1,3] +=0.02
 
+            # Consume thumbstick data to avoid unsafety on velocity commands
+            left_ts, left_tv, right_ts, right_tv = self.tvuer.consume_thumbstick_data()
+
             # return data
             if self.return_state_data:
                 controller_state = TeleStateData(
                     left_trigger_state=self.tvuer.left_controller_trigger_state,
                     left_squeeze_ctrl_state=self.tvuer.left_controller_squeeze_state,
                     left_squeeze_ctrl_value=self.tvuer.left_controller_squeeze_value,
-                    left_thumbstick_state=self.tvuer.left_controller_thumbstick_state,
-                    left_thumbstick_value=self.tvuer.left_controller_thumbstick_value,
+                    left_thumbstick_state=left_ts,
+                    left_thumbstick_value=left_tv,
                     left_aButton=self.tvuer.left_controller_aButton,
                     left_bButton=self.tvuer.left_controller_bButton,
                     right_trigger_state=self.tvuer.right_controller_trigger_state,
                     right_squeeze_ctrl_state=self.tvuer.right_controller_squeeze_state,
                     right_squeeze_ctrl_value=self.tvuer.right_controller_squeeze_value,
-                    right_thumbstick_state=self.tvuer.right_controller_thumbstick_state,
-                    right_thumbstick_value=self.tvuer.right_controller_thumbstick_value,
+                    right_thumbstick_state=right_ts,
+                    right_thumbstick_value=right_tv,
                     right_aButton=self.tvuer.right_controller_aButton,
                     right_bButton=self.tvuer.right_controller_bButton,
                 )

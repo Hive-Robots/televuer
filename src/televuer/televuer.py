@@ -755,3 +755,24 @@ class TeleVuer:
         """bool, right controller 'B' button pressed."""
         with self.right_bButton_shared.get_lock():
             return self.right_bButton_shared.value
+
+    def consume_thumbstick_data(self):
+        """Read and clear all thumbstick state/value atomically per variable.
+
+        Returns (left_state, left_value, right_state, right_value).
+        Clearing on read ensures stale data produces zero commands when the VR
+        connection stops sending updates.
+        """
+        with self.left_thumbstick_state_shared.get_lock():
+            left_state = bool(self.left_thumbstick_state_shared.value)
+            self.left_thumbstick_state_shared.value = False
+        with self.left_thumbstick_value_shared.get_lock():
+            left_value = np.array(self.left_thumbstick_value_shared[:])
+            self.left_thumbstick_value_shared[:] = [0.0, 0.0]
+        with self.right_thumbstick_state_shared.get_lock():
+            right_state = bool(self.right_thumbstick_state_shared.value)
+            self.right_thumbstick_state_shared.value = False
+        with self.right_thumbstick_value_shared.get_lock():
+            right_value = np.array(self.right_thumbstick_value_shared[:])
+            self.right_thumbstick_value_shared[:] = [0.0, 0.0]
+        return left_state, left_value, right_state, right_value
