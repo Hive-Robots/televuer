@@ -210,6 +210,7 @@ class TeleVuer:
         try:
             with self.head_pose_shared.get_lock():
                 self.head_pose_shared[:] = event.value["camera"]["matrix"]
+            self.last_pose_ts_shared.value = _time.time()
         except:
             pass
 
@@ -247,6 +248,7 @@ class TeleVuer:
 
             extract_controller_states(left_controller_state, "left")
             extract_controller_states(right_controller_state, "right")
+            self.last_pose_ts_shared.value = _time.time()
         except:
             pass
 
@@ -291,6 +293,7 @@ class TeleVuer:
             extract_hand_poses(right_hand_data, self.right_arm_pose_shared, self.right_hand_position_shared, self.right_hand_orientation_shared)
             extract_hand_states(left_hand_state, "left")
             extract_hand_states(right_hand_state, "right")
+            self.last_pose_ts_shared.value = _time.time()
 
         except:
             pass
@@ -568,6 +571,11 @@ class TeleVuer:
             _draw_text_panel(frame, ctrl.split("\n"), x=w - 310, y=80, color=(180, 255, 180))
 
     # ==================== common data ====================
+    @property
+    def is_connected(self) -> bool:
+        """True if a pose event was received within the last 0.5 seconds."""
+        return (_time.time() - self.last_pose_ts_shared.value) < 0.5
+
     @property
     def head_pose(self):
         """np.ndarray, shape (4, 4), head SE(3) pose matrix from Vuer (basis OpenXR Convention)."""

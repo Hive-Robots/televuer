@@ -205,6 +205,13 @@ class TeleVuerWrapper:
                                 cam_shm_buffers=cam_shm_buffers,
                                 cam_segments=cam_segments,
                                 cam_layout=cam_layout)
+        self._last_left_arm_input: np.ndarray = CONST_LEFT_ARM_POSE.copy()
+        self._last_right_arm_input: np.ndarray = CONST_RIGHT_ARM_POSE.copy()
+
+    @property
+    def is_connected(self) -> bool:
+        """True if a pose event was received from the XR device within the last 0.5 seconds."""
+        return self.tvuer.is_connected
 
     # ==================== HUD ====================
     @staticmethod
@@ -259,12 +266,25 @@ class TeleVuerWrapper:
         # └───────────────────────────────────┴─────────────────────┘
 
         # TeleVuer (Vuer) obtains all raw data under the (basis) OpenXR Convention.
+        connected = self.tvuer.is_connected
         Bxr_world_head, head_pose_is_valid = safe_mat_update(CONST_HEAD_POSE, self.tvuer.head_pose)
 
         if self.use_hand_tracking:
             # 'Arm' pose data follows (basis) OpenXR Convention and (initial pose) OpenXR Arm Convention.
-            left_IPxr_Bxr_world_arm, left_arm_is_valid  = safe_mat_update(CONST_LEFT_ARM_POSE, self.tvuer.left_arm_pose)
-            right_IPxr_Bxr_world_arm, right_arm_is_valid = safe_mat_update(CONST_RIGHT_ARM_POSE, self.tvuer.right_arm_pose)
+            if connected:
+                _left_fallback  = self._last_left_arm_input
+                _right_fallback = self._last_right_arm_input
+                left_IPxr_Bxr_world_arm,  left_arm_is_valid  = safe_mat_update(_left_fallback,  self.tvuer.left_arm_pose)
+                right_IPxr_Bxr_world_arm, right_arm_is_valid = safe_mat_update(_right_fallback, self.tvuer.right_arm_pose)
+                if left_arm_is_valid:
+                    self._last_left_arm_input  = left_IPxr_Bxr_world_arm
+                if right_arm_is_valid:
+                    self._last_right_arm_input = right_IPxr_Bxr_world_arm
+            else:
+                left_IPxr_Bxr_world_arm  = self._last_left_arm_input
+                right_IPxr_Bxr_world_arm = self._last_right_arm_input
+                left_arm_is_valid  = True
+                right_arm_is_valid = True
 
             # Change basis convention
             # From (basis) OpenXR Convention to (basis) Robot Convention:
@@ -390,8 +410,20 @@ class TeleVuerWrapper:
             )
         else:
             # Controller pose data directly follows the (initial pose) Unitree Humanoid Arm URDF Convention (thus no transform is needed).
-            left_IPunitree_Bxr_world_arm, left_arm_is_valid  = safe_mat_update(CONST_LEFT_ARM_POSE, self.tvuer.left_arm_pose)
-            right_IPunitree_Bxr_world_arm, right_arm_is_valid = safe_mat_update(CONST_RIGHT_ARM_POSE, self.tvuer.right_arm_pose)
+            if connected:
+                _left_fallback  = self._last_left_arm_input
+                _right_fallback = self._last_right_arm_input
+                left_IPunitree_Bxr_world_arm,  left_arm_is_valid  = safe_mat_update(_left_fallback,  self.tvuer.left_arm_pose)
+                right_IPunitree_Bxr_world_arm, right_arm_is_valid = safe_mat_update(_right_fallback, self.tvuer.right_arm_pose)
+                if left_arm_is_valid:
+                    self._last_left_arm_input  = left_IPunitree_Bxr_world_arm
+                if right_arm_is_valid:
+                    self._last_right_arm_input = right_IPunitree_Bxr_world_arm
+            else:
+                left_IPunitree_Bxr_world_arm  = self._last_left_arm_input
+                right_IPunitree_Bxr_world_arm = self._last_right_arm_input
+                left_arm_is_valid  = True
+                right_arm_is_valid = True
 
             # Change basis convention
             Brobot_world_head = T_ROBOT_OPENXR @ Bxr_world_head @ T_OPENXR_ROBOT
