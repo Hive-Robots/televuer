@@ -207,6 +207,7 @@ class TeleVuerWrapper:
                                 cam_layout=cam_layout)
         self._last_left_arm_input: np.ndarray = CONST_LEFT_ARM_POSE.copy()
         self._last_right_arm_input: np.ndarray = CONST_RIGHT_ARM_POSE.copy()
+        self._last_head_input: np.ndarray = CONST_HEAD_POSE.copy()
 
     @property
     def is_connected(self) -> bool:
@@ -267,7 +268,12 @@ class TeleVuerWrapper:
 
         # TeleVuer (Vuer) obtains all raw data under the (basis) OpenXR Convention.
         connected = self.tvuer.is_connected
-        Bxr_world_head, head_pose_is_valid = safe_mat_update(CONST_HEAD_POSE, self.tvuer.head_pose)
+        if connected:
+            Bxr_world_head, head_pose_is_valid = safe_mat_update(self._last_head_input, self.tvuer.head_pose)
+            if head_pose_is_valid:
+                self._last_head_input = Bxr_world_head
+        else:
+            Bxr_world_head = self._last_head_input
 
         if self.use_hand_tracking:
             # 'Arm' pose data follows (basis) OpenXR Convention and (initial pose) OpenXR Arm Convention.
