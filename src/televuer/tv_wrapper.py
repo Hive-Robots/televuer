@@ -125,15 +125,16 @@ CONST_HEAD_POSE = np.array([[1, 0, 0, 0],
                             [0, 0, 1, -0.2],
                             [0, 0, 0, 1]])
 
-# For Robot initial position
+# For Robot initial position (Adjust for new robots)
+# VR pose when NOT valid: WORLD frame (Y: Pointing Up from the floor, Z: Pointing Back from robot base)
 CONST_RIGHT_ARM_POSE = np.array([[1, 0, 0, 0.15],
-                                 [0, 1, 0, 1.13],
-                                 [0, 0, 1, -0.3],
+                                 [0, 1, 0, 0.1],
+                                 [0, 0, 1, -0.1],
                                  [0, 0, 0, 1]])
 
 CONST_LEFT_ARM_POSE = np.array([[1, 0, 0, -0.15],
-                                [0, 1, 0, 1.13],
-                                [0, 0, 1, -0.3],
+                                [0, 1, 0, 0.1],
+                                [0, 0, 1, -0.1],
                                 [0, 0, 0, 1]])
 
 CONST_HAND_ROT = np.tile(np.eye(3)[None, :, :], (25, 1, 1))
