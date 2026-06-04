@@ -137,6 +137,13 @@ CONST_LEFT_ARM_POSE = np.array([[1, 0, 0, -0.15],
                                 [0, 0, 1, -0.1],
                                 [0, 0, 0, 1]])
 
+# Thresholds for detecting a discontinuous head-pose jump (e.g. VR browser leaving
+# immersive mode). At 60 Hz a hard physical head snap is ~0.05 m and ~8 deg per frame;
+# these limits are 6x and 4x above that, so they never fire on real movement but
+# always catch the 1-3 m / 90-180 deg jump that occurs on VR-exit.
+CAMERA_TRANSLATION_DETECTION = 0.2          # meters per update
+CAMERA_ROTATION_DETECTION    = np.deg2rad(10)  # radians per update (~10 deg)
+
 CONST_HAND_ROT = np.tile(np.eye(3)[None, :, :], (25, 1, 1))
 
 @dataclass
@@ -210,11 +217,6 @@ class TeleVuerWrapper:
         self._last_right_arm_input: np.ndarray = CONST_RIGHT_ARM_POSE.copy()
         self._last_head_input: np.ndarray = CONST_HEAD_POSE.copy()
 
-    @property
-    def is_connected(self) -> bool:
-        """True if a pose event was received from the XR device within the last 0.5 seconds."""
-        return self.tvuer.is_connected
-
     # ==================== HUD ====================
     @staticmethod
     def _write_str(arr, s: str, size: int) -> None:
@@ -249,7 +251,7 @@ class TeleVuerWrapper:
         self._write_str(self.tvuer.hud_notify_text_shared, text, 128)
         self.tvuer.hud_notify_ts_shared.value = time.time()
 
-    def get_motion_state_data(self):
+    def get_motion_state_data(self, motion_active: bool = True):
         """
         Get processed motion state data from the TeleVuer instance.
 
@@ -268,9 +270,22 @@ class TeleVuerWrapper:
         # └───────────────────────────────────┴─────────────────────┘
 
         # TeleVuer (Vuer) obtains all raw data under the (basis) OpenXR Convention.
-        Bxr_world_head, head_pose_is_valid = safe_mat_update(self._last_head_input, self.tvuer.head_pose)
-        if head_pose_is_valid:
-            self._last_head_input = Bxr_world_head
+        _raw_head = self.tvuer.head_pose
+        if motion_active:
+            _trans_delta = np.linalg.norm(_raw_head[:3, 3] - self._last_head_input[:3, 3])
+            _R_delta     = self._last_head_input[:3, :3].T @ _raw_head[:3, :3]
+            _rot_delta   = np.arccos(np.clip((np.trace(_R_delta) - 1.0) / 2.0, -1.0, 1.0))
+            #print(f"[head_jump] trans={_trans_delta:.4f} m  rot={np.rad2deg(_rot_delta):.2f} deg")
+            if _trans_delta > CAMERA_TRANSLATION_DETECTION or _rot_delta > CAMERA_ROTATION_DETECTION:
+                Bxr_world_head = self._last_head_input
+            else:
+                Bxr_world_head, head_pose_is_valid = safe_mat_update(self._last_head_input, _raw_head)
+                if head_pose_is_valid:
+                    self._last_head_input = Bxr_world_head
+        else:
+            Bxr_world_head, head_pose_is_valid = safe_mat_update(self._last_head_input, _raw_head)
+            if head_pose_is_valid:
+                self._last_head_input = Bxr_world_head
 
         if self.use_hand_tracking:
             # 'Arm' pose data follows (basis) OpenXR Convention and (initial pose) OpenXR Arm Convention.
