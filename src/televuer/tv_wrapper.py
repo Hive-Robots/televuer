@@ -251,6 +251,10 @@ class TeleVuerWrapper:
         self._write_str(self.tvuer.hud_notify_text_shared, text, 128)
         self.tvuer.hud_notify_ts_shared.value = time.time()
 
+    @property
+    def last_pose_t(self) -> float:
+        return self.tvuer.last_pose_t.value
+
     def get_motion_state_data(self, motion_active: bool = True):
         """
         Get processed motion state data from the TeleVuer instance.

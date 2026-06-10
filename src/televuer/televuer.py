@@ -163,6 +163,8 @@ class TeleVuer:
         self.hud_notify_text_shared  = Array('c', 128, lock=True)
         self.hud_notify_ts_shared    = Value('d', 0.0, lock=True)
 
+        self.last_pose_t = Value('d', 0.0, lock=False)
+
         # Kill any stale process holding this port (e.g., from a previous run that segfaulted
         # and bypassed daemon-process cleanup). This ensures the new vuer server can bind.
         import subprocess as _sp
@@ -247,6 +249,7 @@ class TeleVuer:
 
             extract_controller_states(left_controller_state, "left")
             extract_controller_states(right_controller_state, "right")
+            self.last_pose_t.value = _time.perf_counter()
         except:
             pass
 
@@ -291,6 +294,7 @@ class TeleVuer:
             extract_hand_poses(right_hand_data, self.right_arm_pose_shared, self.right_hand_position_shared, self.right_hand_orientation_shared)
             extract_hand_states(left_hand_state, "left")
             extract_hand_states(right_hand_state, "right")
+            self.last_pose_t.value = _time.perf_counter()
         except:
             pass
     
