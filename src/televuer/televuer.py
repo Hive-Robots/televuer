@@ -163,7 +163,9 @@ class TeleVuer:
         self.hud_notify_text_shared  = Array('c', 128, lock=True)
         self.hud_notify_ts_shared    = Value('d', 0.0, lock=True)
 
-        self.last_pose_t = Value('d', 0.0, lock=False)
+        self.last_pose_t    = Value('d', 0.0, lock=False)
+        self.vr_interval_ms = Value('d', 0.0, lock=False)
+        self._last_ctrl_t   = 0.0
 
         # Kill any stale process holding this port (e.g., from a previous run that segfaulted
         # and bypassed daemon-process cleanup). This ensures the new vuer server can bind.
@@ -217,6 +219,10 @@ class TeleVuer:
 
     async def on_controller_move(self, event, session, fps=60):
         try:
+            _now = _time.perf_counter()
+            if self._last_ctrl_t > 0.0:
+                self.vr_interval_ms.value = (_now - self._last_ctrl_t) * 1000.0
+            self._last_ctrl_t = _now
             with self.left_arm_pose_shared.get_lock():
                 self.left_arm_pose_shared[:] = event.value["left"]
             with self.right_arm_pose_shared.get_lock():

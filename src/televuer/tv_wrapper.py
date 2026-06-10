@@ -255,6 +255,10 @@ class TeleVuerWrapper:
     def last_pose_t(self) -> float:
         return self.tvuer.last_pose_t.value
 
+    @property
+    def vr_interval_ms(self) -> float:
+        return self.tvuer.vr_interval_ms.value
+
     def get_motion_state_data(self, motion_active: bool = True):
         """
         Get processed motion state data from the TeleVuer instance.
