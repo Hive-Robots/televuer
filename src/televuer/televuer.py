@@ -323,6 +323,7 @@ class TeleVuer:
                     key="motionControllers",
                     left=True,
                     right=True,
+                    fps=120,
                 ),
                 to="bgChildren",
             )
@@ -354,6 +355,7 @@ class TeleVuer:
                     key="motionControllers",
                     left=True,
                     right=True,
+                    fps=120,
                 ),
                 to="bgChildren",
             )
